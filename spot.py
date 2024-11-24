@@ -19,6 +19,20 @@ async def ping(ctx):
     """Responds with 'heard.' to test bot functionality."""
     await ctx.send("heard.")
 
+def switchitup(action):
+    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", "Path\\To\\audio_switcher.ps1", action])
+
+@bot.event
+async def on_ready():
+    switchitup("start")
+    print("Bot started, Spotify output switched to CABLE Input.")
+
+@bot.event
+async def on_disconnect():
+    switchitup("stop")
+    print("Bot stopped, Spotify output switched back to Default.")
+
+
 @bot.command()
 async def joinmesempai(ctx):
     """Join the user's voice channel."""
