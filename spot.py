@@ -56,7 +56,9 @@ async def violatemesempai(ctx):
                 "ffmpeg",
                 "-f", "dshow",
                 "-i", "audio=CABLE Output (VB-Audio Virtual Cable)",
-                "-f", "wav",
+                "-ac", "2",         # Set audio channels to stereo
+                "-ar", "48000",     # Set audio sample rate to 48kHz
+                "-f", "s16le",      # Output raw PCM 16-bit little-endian
                 "pipe:1"
             ]
 
@@ -64,7 +66,7 @@ async def violatemesempai(ctx):
             process = subprocess.Popen(
                 ffmpeg_command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL # Avoid blocking by discarding stderr
+                stderr=subprocess.DEVNULL  # Prevents FFmpeg from blocking or overloading
             )
 
             # Attach the FFmpeg output to the bot
