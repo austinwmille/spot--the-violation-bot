@@ -30,7 +30,7 @@ sp = Spotify(auth_manager=SpotifyOAuth(
 ))
 
 # Replace with the Discord user IDs of allowed users
-ALLOWED_USER_IDS = [688148738774138913, 472099505269899266]  # Add your ID and the other user's ID
+ALLOWED_USER_IDS = [688148738774138913, 472099505269899266, 764260458898915345]  # Add your ID and the other user's ID
 
 @bot.event
 async def on_ready():
@@ -82,6 +82,47 @@ async def helpmestepbro(ctx):
 *Bask in my ~~cum~~--glory, uWu*
 """
     await ctx.send(help_message)
+
+@bot.command()
+@allowed_users_only
+async def currentsong(ctx):
+    """Display the currently playing Spotify song."""
+    try:
+        current_track = sp.current_playback()
+        if current_track and current_track['is_playing']:
+            track_name = current_track['item']['name']
+            artist_name = current_track['item']['artists'][0]['name']
+            await ctx.send(f"🎵 Currently playing: *{track_name}* by {artist_name}")
+        else:
+            await ctx.send("No music is currently playing, uWu.")
+    except Exception as e:
+        print(f"Error fetching current song: {e}")
+        await ctx.send("Something went wrong while fetching the current song.")
+
+@bot.command()
+@allowed_users_only
+async def addsong(ctx, *, song_name):
+    """Add a song to the default Spotify playlist."""
+    try:
+        # Replace with your playlist ID or store it in .env
+        playlist_id = os.getenv("SPOTIFY_PLAYLIST_ID")
+
+        # Search for the song
+        results = sp.search(q=song_name, type="track", limit=1)
+        if results['tracks']['items']:
+            track = results['tracks']['items'][0]
+            track_name = track['name']
+            artist_name = track['artists'][0]['name']
+            track_id = track['id']
+
+            # Add the track to the playlist
+            sp.playlist_add_items(playlist_id, [track_id])
+            await ctx.send(f"🎵 Added *{track_name}* by {artist_name} to the playlist!")
+        else:
+            await ctx.send("Couldn't find the song. Please check the title and try again, uWu.")
+    except Exception as e:
+        print(f"Error adding song: {e}")
+        await ctx.send("Something went wrong while adding the song.")
 
 
 @bot.command()
