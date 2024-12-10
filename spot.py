@@ -52,6 +52,16 @@ async def on_ready():
             await bot.change_presence(activity=discord.Game(name="Spotify Bot"))
         await asyncio.sleep(15)
 
+@bot.command()
+async def show_emojis(ctx):
+    emojis = [str(emoji) for emoji in ctx.guild.emojis]
+    await ctx.send(f"Available emojis: {' '.join(emojis)}")
+
+@bot.command()
+async def greet(ctx):
+    custom_emoji = "<:smile:123456789012345678>"
+    await ctx.send(f"Hello! {custom_emoji}")
+
 # Decorator to restrict commands to allowed users
 def allowed_users_only(func):
     @wraps(func)  # Preserve the original function name
