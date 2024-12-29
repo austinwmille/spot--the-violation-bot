@@ -8,13 +8,14 @@ import subprocess
 import random
 import asyncio
 from functools import wraps
-
+from openai import OpenAI
 
 # Load tokens securely
 load_dotenv("botsecs.env")
 TOKEN = os.getenv("DISCORD_TOKEN")  # Make sure to set DISCORD_TOKEN in your .env file
 spoid = os.getenv("spoid")
 spoecs = os.getenv("spoecs")
+gptkey = os.getenv("gptkey")
 
 # Set up intents and bot
 intents = discord.Intents.default()
@@ -30,7 +31,10 @@ sp = Spotify(auth_manager=SpotifyOAuth(
 ))
 
 # Replace with the Discord user IDs of allowed users
-ALLOWED_USER_IDS = [688148738774138913, 472099505269899266, 764260458898915345]  # Add your ID and the other user's ID
+ALLOWED_USER_IDS = [688148738774138913,
+                    472099505269899266,
+                    #764260458898915345
+                    ]  # Add your ID and the other user's ID
 
 @bot.event
 async def on_ready():
@@ -83,13 +87,14 @@ async def helpmestepbro(ctx):
 - `!hitmesempai`: Pause/resume Spotify playback.
 - `!skipthissempai`: Skip the currently playing track.
 - `!sleepsempai`: Makes the bot leave the voice channel.
-- `!currentsong`: Display the currently playing Spotify song. (WIP)
+- `!play` <song title>: Searches Spotify for 'song title' and plays first result.
+- `!currentsong`: Display the currently playing Spotify song.
 - `!volume <0-100>`: Set the volume for the bot. (WIP)
 - `!recommendsong`: Suggest a random song from your playlists.
-- `!violateme`: Get a random (very) dirty response from the bot.
+- `!violateme`: Get a random dirty response from the bot.
 - `!helpmestepbro`: Show this help message.
 
-*Bask in my ~~cum~~--glory, uWu*
+*Bask in my ~~love~~--glory, uWu*
 """
     await ctx.send(help_message)
 
@@ -111,29 +116,15 @@ async def currentsong(ctx):
 
 @bot.command()
 @allowed_users_only
-async def addsong(ctx, *, song_name):
-    """Add a song to the default Spotify playlist."""
-    try:
-        # Replace with your playlist ID or store it in .env
-        playlist_id = os.getenv("SPOTIFY_PLAYLIST_ID")
-
-        # Search for the song
-        results = sp.search(q=song_name, type="track", limit=1)
-        if results['tracks']['items']:
-            track = results['tracks']['items'][0]
-            track_name = track['name']
-            artist_name = track['artists'][0]['name']
-            track_id = track['id']
-
-            # Add the track to the playlist
-            sp.playlist_add_items(playlist_id, [track_id])
-            await ctx.send(f"🎵 Added *{track_name}* by {artist_name} to the playlist!")
-        else:
-            await ctx.send("Couldn't find the song. Please check the title and try again, uWu.")
-    except Exception as e:
-        print(f"Error adding song: {e}")
-        await ctx.send("Something went wrong while adding the song.")
-
+async def play(ctx, *, song_name):
+    """Search for and play a song on Spotify."""
+    results = sp.search(q=song_name, type="track", limit=1)
+    if results['tracks']['items']:
+        track_uri = results['tracks']['items'][0]['uri']
+        sp.start_playback(uris=[track_uri])
+        await ctx.send(f"Now playing: {results['tracks']['items'][0]['name']}")
+    else:
+        await ctx.send("Song not found.")
 
 @bot.command()
 @allowed_users_only
@@ -233,21 +224,26 @@ async def summon(ctx):
 @bot.command()
 async def violateme(ctx):
     responses = [
-        "Violation commencing...",
         "you're a dirty girl",
         "get on your knees and throat me",
         "yeah, you like that don't you",
-        "stop talking or I'll get the cuffs"
+        "Be careful with that language.."
     ]
     response = random.choice(responses)
     await ctx.send(response)
 
 @bot.command()
+@allowed_users_only
 async def volume(ctx, level: int):
     """Set the playback volume (0-100)."""
     if 0 <= level <= 100:
         # Adjust volume logic here (if possible with FFmpeg)
-        await ctx.send(f"Volume set to {level}%.")
+        # trying the following line of logic to see if it works
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            ctx.voice_client.source.volume = level / 100
+            await ctx.send(f"Volume set to {level}%.")
+        else:
+            await ctx.send("No audio is currently playing.")
     else:
         await ctx.send("Please specify a volume between 0 and 100.")
 
@@ -256,6 +252,52 @@ async def nightsempai(ctx):
     """Shut down the bot."""
     await ctx.send("Goodbye, uWu!")
     await bot.close()
+
+# ----------------this last command is the GPT api inclusion --------------------
+
+client = OpenAI(
+    api_key=gptkey
+)
+
+user_context = {}
+
+@bot.command()
+@commands.cooldown(1, 4, commands.BucketType.user)  # 1 use every 4 seconds
+async def hey(ctx, *, question: str):
+    '''
+    The following adds in a 'memory' for each user
+    '''
+    user_id = ctx.author.id
+    if user_id not in user_context:
+        user_context[user_id] = [{"role": "system", "content": "You are Discord-savvy assistant with a cheeky, anti-capitalist, kawaii, and existential tone.."}]
+    
+    user_context[user_id].append({"role": "user", "content": question})
+    """
+    Ask GPT a question and get a response.
+    Example: !askgpt What is the capital of France?
+    """
+    try:
+        # Show typing indicator
+        await ctx.channel.typing()
+
+        # Call the OpenAI API
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=user_context[user_id],
+            max_tokens=150,
+            temperature=0.7
+        )
+
+        # Extract the response content
+        answer = response.choices[0].message.content
+        user_context[user_id].append({"role": "assistant", "content": answer})
+
+        # Send the GPT response to Discord
+        await ctx.send(answer)
+
+    except Exception as e:
+        print(f"Error with GPT request: {e}")
+        await ctx.send("Sorry, something went wrong with GPT. Please try again.")
 
 # Run the bot
 bot.run(TOKEN)
