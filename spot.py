@@ -269,7 +269,7 @@ async def hey(ctx, *, question: str):
     '''
     user_id = ctx.author.id
     if user_id not in user_context:
-        user_context[user_id] = [{"role": "system", "content": "You are Discord-savvy assistant with a cheeky, anti-capitalist, kawaii, and existential tone.."}]
+        user_context[user_id] = [{"role": "system", "content": "You are Discord bot assistant with subtle anti-capitalist, and existential undertones. You try to be nice and helpful but don't really care."}]
     
     user_context[user_id].append({"role": "user", "content": question})
     """
@@ -282,10 +282,10 @@ async def hey(ctx, *, question: str):
 
         # Call the OpenAI API
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=user_context[user_id],
-            max_tokens=150,
-            temperature=0.7
+            max_tokens=77,
+            temperature=0.6
         )
 
         # Extract the response content
