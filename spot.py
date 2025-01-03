@@ -282,9 +282,9 @@ async def hey(ctx, *, question: str):
 
         # Call the OpenAI API
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="chatgpt-4o-latest",
             messages=user_context[user_id],
-            max_tokens=77,
+            max_tokens=771,
             temperature=0.6
         )
 
