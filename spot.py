@@ -36,6 +36,54 @@ ALLOWED_USER_IDS = [688148738774138913,
                     #764260458898915345
                     ]  # Add your ID and the other user's ID
 
+import discord
+from discord.ext import commands
+from fuzzywuzzy import process
+import openai
+
+# 🔹 Define available commands
+VALID_COMMANDS = [
+    "violateme", "joinmesempai", "violatemesempai", "hitmesempai", 
+    "skipthissempai", "sleepsempai", "play", "currentsong",
+    "volume", "show_emojis", "summon", "ping", "nightsempai", "hey"
+]
+
+@bot.event
+async def on_message(message):
+    """Automatically corrects near-miss commands and executes the closest match."""
+    if message.author == bot.user or not message.content.startswith("!"):
+        return  # Ignore bot messages & non-commands
+
+    command = message.content[1:].split()[0]  # Extract command after "!"
+    
+    # 🔹 Find the closest matching command
+    best_match, confidence = process.extractOne(command, VALID_COMMANDS)
+
+    if confidence > 75:  # If it's a strong match, auto-correct it
+        corrected_command = f"!{best_match} " + " ".join(message.content.split()[1:])
+        await message.channel.send(f"🤖 **Did you mean:** `{corrected_command.strip()}`?")
+        message.content = corrected_command  # Modify the message content
+        await bot.process_commands(message)  # Process corrected command
+        return
+
+    # 🔹 If no good match, use OpenAI API for intent guessing
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a Discord bot that corrects invalid commands."},
+            {"role": "user", "content": f"User entered `{message.content}`. What valid command should they have used? Available commands: {', '.join(VALID_COMMANDS)}. Return only the best match, nothing else."}
+        ]
+    )
+    ai_suggestion = response['choices'][0]['message']['content'].strip()
+
+    if ai_suggestion in VALID_COMMANDS:
+        corrected_command = f"!{ai_suggestion} " + " ".join(message.content.split()[1:])
+        await message.channel.send(f"🤖 **Did you mean:** `{corrected_command.strip()}`?")
+        message.content = corrected_command
+        await bot.process_commands(message)
+    else:
+        await message.channel.send("❌ **Unknown command.** Try `!help` for a list of commands.")
+
 @bot.event
 async def on_ready():
     switchitup("start")
