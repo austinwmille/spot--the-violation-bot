@@ -79,20 +79,28 @@ def allowed_users_only(func):
 @bot.command()
 async def helpmestepbro(ctx):
     """Display a list of available commands and their descriptions."""
-    help_message = """
-**Spot, the Violation Bot** - Commands:
+    help_message = """```diff
++ Spot, the Violation Bot - Commands:
     
-- `!joinmesempai`: Joins your current voice channel.
-- `!violatemesempai`: Starts streaming Spotify audio through the bot.
-- `!hitmesempai`: Pause/resume Spotify playback.
-- `!skipthissempai`: Skip the currently playing track.
-- `!sleepsempai`: Makes the bot leave the voice channel.
-- `!play` <song title>: Searches Spotify for 'song title' and plays first result.
-- `!currentsong`: Display the currently playing Spotify song.
-- `!volume <0-100>`: Set the volume for the bot. (WIP)
-- `!recommendsong`: Suggest a random song from your playlists.
-- `!violateme`: Get a random dirty response from the bot.
-- `!helpmestepbro`: Show this help message.
+🎶 Spotify Controls:
+- !joinmesempai     -> Join voice chat.
+- !violatemesempai  -> Stream Spotify through bot.
+- !hitmesempai      -> Pause/resume Spotify.
+- !skipthissempai   -> Skip the current track.
+- !sleepsempai      -> Leave voice chat.
+- !play <song>      -> Search & play a song.
+- !currentsong      -> Show currently playing song.
+- !volume <0-100>   -> Set bot volume (WIP).
+
+🛠️ Bot & Misc:
+- !show_emojis      -> Show available emojis.
+- !violateme        -> Get a random, dirty response.
+- !summon           -> Make the bot say something dumb.
+- !ping             -> Check if the bot is working.
+- !nightsempai      -> Shut down the bot.
+
+GPT AI Commands:
+- !hey <question>   -> Ask the bot an existential crisis.
 
 *Bask in my ~~love~~--glory, uWu*
 """
@@ -223,11 +231,19 @@ async def summon(ctx):
 
 @bot.command()
 async def violateme(ctx):
+    """Sends a random violation message."""
     responses = [
-        "you're a dirty girl",
-        "get on your knees and throat me",
-        "yeah, you like that don't you",
-        "Be careful with that language.."
+        "you're a dirty girl.",
+        "get on your knees and throat me.",
+        "yeah, you like that don't you.",
+        "Be careful with that language..",
+        "violated in 4K.",
+        "congrats, you're now on a watchlist.",
+        "your FBI agent is deeply concerned.",
+        "this is why we can't have nice things.",
+        "do you ever just sit and think about your choices?",
+        "damn, even I wasn't ready for that one.",
+        "that's an HR violation waiting to happen."
     ]
     response = random.choice(responses)
     await ctx.send(response)
@@ -246,6 +262,13 @@ async def volume(ctx, level: int):
             await ctx.send("No audio is currently playing.")
     else:
         await ctx.send("Please specify a volume between 0 and 100.")
+
+@bot.command()
+async def shutdown(ctx):
+    """Manually shut down the bot and reset Spotify output."""
+    await ctx.send("Goodbye, uWu!")
+    switchitup("stop")  # Reset Spotify before shutting down
+    await bot.close()
 
 @bot.command()
 async def nightsempai(ctx):
