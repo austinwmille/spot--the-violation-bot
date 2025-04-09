@@ -23,6 +23,9 @@ spoid = os.getenv("spoid")
 spoecs = os.getenv("spoecs")
 gptkey = os.getenv("gptkey")
 
+guildID = 1140053353615859842
+musicchannelID = 1140053354240815157
+
 # Set up Discord intents and bot
 intents = discord.Intents.default()
 intents.message_content = True  # Enable in Developer Portal
@@ -46,10 +49,10 @@ ALLOWED_USER_IDS = [
 def allowed_users_only(func):
     @wraps(func)
     async def wrapper(ctx, *args, **kwargs):
-        if ctx.author.id in [688148738774138913, 472099505269899266]:
+        if ctx.author.id in ALLOWED_USER_IDS:
             return await func(ctx, *args, **kwargs)
         else:
-            await ctx.send("Your taste in music has not been deemed shitty enough to use this command, uWu")
+            await ctx.send("Your taste in music has been deemed not shitty enough to use this command, uWu")
     return wrapper
 
 # Check required environment variables
@@ -62,101 +65,79 @@ for var in required_env_vars:
 # OpenAI client setup
 client = OpenAI(api_key=gptkey)
 
+@tasks.loop(seconds=5)
+async def auto_stream():
+    try:
+        current_playback = sp.current_playback()
+    except Exception as e:
+        print(f"Error fetching Spotify playback: {e}")
+        current_playback = None
+
+    # If Spotify is playing
+    if current_playback and current_playback.get('is_playing'):
+        # Determine if the bot is already in a voice channel for the desired guild
+        guild = bot.get_guild(guildID)
+        # Check if the bot has an active voice client in this guild
+        voice_client = discord.utils.get(bot.voice_clients, guild=guild)
+        
+        # If not connected, try to join
+        if not voice_client:
+            channel = guild.get_channel(musicchannelID)
+            if channel and isinstance(channel, discord.VoiceChannel):
+                try:
+                    voice_client = await channel.connect()
+                    print("Oh! There's music playing")
+                except Exception as e:
+                    print(f"Could not connect to voice channel: {e}")
+                    return
+        
+        # If connected but not already playing audio, start playing
+        if voice_client and not voice_client.is_playing():
+            try:
+                # Prepare FFmpegPCMAudio source from the virtual cable
+                source = discord.FFmpegPCMAudio(
+                    source="audio=CABLE Output (VB-Audio Virtual Cable)",
+                    before_options="-f dshow -analyzeduration 0 -probesize 32",
+                    options="-ac 2 -ar 48000 -bufsize 256k -threads 2 -vn"
+                )
+                voice_client.play(source, after=lambda e: print(f"Playback finished: {e}"))
+                print("Started streaming Spotify output.")
+            except Exception as e:
+                print(f"Error starting audio stream: {e}")
+    else:
+        # If Spotify is not playing and the bot is connected, disconnect to be unobtrusive
+        for vc in bot.voice_clients:
+            try:
+                await vc.disconnect()
+                print("Leaving channel because music stopped")
+            except Exception as e:
+                print(f"Error disconnecting voice client: {e}")
+
+@bot.event
+async def on_ready():
+    auto_stream.start()
+
+@bot.command()
+@allowed_users_only
+async def nightsempai(ctx):
+    """Shut down the bot."""
+    await ctx.send("night, sempai")
+    await bot.close()
+
 # ------------------ Command Handling ------------------
 
 # List of valid bot commands
 VALID_COMMANDS = [
-    "violateme", "joinmesempai", "violatemesempai", "hitmesempai",
+    "hitmesempai",
     "skipthissempai", "sleepsempai", "play", "currentsong",
-    "volume", "show_emojis", "summon", "ping", "nightsempai", "hey"
+    "volume", "show_emojis", "nightsempai"
 ]
-
-@bot.event
-async def on_message(message):
-    # Ignore messages from the bot and non-commands
-    if message.author == bot.user or not message.content.startswith("!"):
-        return
-
-    user_input = message.content[1:].strip()  # Remove the leading "!"
-    command_name = user_input.split()[0]
-    if command_name in VALID_COMMANDS:
-        await bot.process_commands(message)
-        return
-
-    # Otherwise, use OpenAI to determine the intended command.
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": (
-                "You are a Discord bot that helps users by converting their input into valid bot commands. "
-                "Only return one command from this list:\n"
-                "!violateme, !joinmesempai, !violatemesempai, !hitmesempai, "
-                "!skipthissempai, !sleepsempai, !play, !currentsong, "
-                "!volume, !show_emojis, !summon, !ping, !nightsempai, !hey\n"
-                "If no command fits, return 'UNKNOWN_COMMAND'."
-            )},
-            {"role": "user", "content": f"User input: `{user_input}`. What command should be used?"}
-        ]
-    )
-    ai_suggestion = response.choices[0].message.content.strip()
-    if ai_suggestion in VALID_COMMANDS:
-        message.content = ai_suggestion  # Replace with AI suggestion
-        await message.channel.send(f"🤖 **Did you mean:** `{ai_suggestion}`?")
-        await bot.process_commands(message)
-    else:
-        await message.channel.send("❌ **Unknown command.** Try `!help` for a list of commands.")
-
-@bot.event
-async def on_ready():
-    print("Registered Commands:", [cmd.name for cmd in bot.commands])
-    print(f"{bot.user} is online!")
 
 # ---------------- Spotify Output Setup ----------------
 
-def set_spotify_output():
-    """Runs a PowerShell script to set Spotify output device."""
-    try:
-        subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", "C:\\Users\\austi\\GitHub\\spot--the-violation-bot\\switchitup.ps1"], check=True)
-        print("Spotify output changed to CABLE Input successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"Failed to change Spotify output: {e}")
-
-# Call the function at startup
-set_spotify_output()
-
-import atexit
-def reset_spotify_output():
-    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", "./switchitup.ps1", "stop"])
-atexit.register(reset_spotify_output)
+# these functions have been superceded by the auto_play function
 
 # ---------------- Status Tasks ----------------
-
-@tasks.loop(seconds=30)
-async def cycle_status():
-    statuses = [
-        discord.Activity(type=discord.ActivityType.playing, name="with Spotify"),
-        discord.Activity(type=discord.ActivityType.listening, name="your commands"),
-        discord.Activity(type=discord.ActivityType.watching, name="over the server"),
-        discord.Activity(type=discord.ActivityType.playing, name="!help for commands"),
-    ]
-    new_status = random.choice(statuses)
-    await bot.change_presence(activity=new_status)
-
-@tasks.loop(seconds=15)
-async def update_spotify_status():
-    try:
-        current_track = sp.current_playback()
-        if current_track and current_track['is_playing']:
-            track_name = current_track['item']['name']
-            artist_name = current_track['item']['artists'][0]['name']
-            status = f"🎵 {track_name} by {artist_name}"
-        else:
-            status = "silence 🎧"
-        await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=status))
-    except Exception as e:
-        print(f"Error updating Spotify status: {e}")
-        await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.playing, name="Spotify Bot"))
-
 @bot.command()
 async def show_emojis(ctx):
     emojis = [str(emoji) for emoji in ctx.guild.emojis]
@@ -301,107 +282,59 @@ async def volume(ctx, level: int):
     else:
         await ctx.send("Please specify a volume between 0 and 100.")
 
-# ---------------- Voice Channel Commands ----------------
-
-@bot.command(aliases=['join', 'connect'])
-@allowed_users_only
-async def joinmesempai(ctx):
-    """Join the user's voice channel."""
-    if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        await channel.connect()
-        await ctx.send("Joined the voice channel, ready to violate.")
-    else:
-        await ctx.send("You're not in a voice channel, dummy.")
-
-@bot.command()
-@allowed_users_only
-async def violatemesempai(ctx):
-    """Stream audio from a virtual audio cable."""
-    if ctx.voice_client:
-        vc = ctx.voice_client
-        try:
-            print("Attempting Spotify violation...")
-            source = discord.FFmpegPCMAudio(
-                source="audio=CABLE Output (VB-Audio Virtual Cable)",
-                before_options="-f dshow -analyzeduration 0 -probesize 32",
-                options="-ac 2 -ar 48000 -bufsize 256k -threads 2 -vn"
-            )
-            vc.play(source, after=lambda e: print(f"Playback finished: {e}"))
-            await ctx.send("Illegal activities have commenced! Enjoy.")
-        except Exception as e:
-            print(f"Error during playback: {e}")
-            await ctx.send(f"Error playing audio: {e}")
-    else:
-        await ctx.send("Bring me to the voice channel first, uWu.")
-
-@bot.command()
-@allowed_users_only
-async def sleepsempai(ctx):
-    """Leave the voice channel."""
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.send("Legality reestablished.")
-    else:
-        await ctx.send("I'm not in a voice channel, uWu.")
-
-@bot.command()
-async def summon(ctx):
-    await ctx.send("I'm here and ready to violate copyright, uWu!")
-
-@bot.command()
-async def violateme(ctx):
-    """Sends a random violation message."""
-    responses = [
-        "you're a dirty girl.",
-        "get on your knees and throat me.",
-        "yeah, you like that don't you.",
-        "Be careful with that language..",
-        "violated in 4K.",
-        "congrats, you're now on a watchlist.",
-        "your FBI agent is deeply concerned.",
-        "this is why we can't have nice things.",
-        "do you ever just sit and think about your choices?",
-        "damn, even I wasn't ready for that one.",
-        "that's an HR violation waiting to happen."
-    ]
-    await ctx.send(random.choice(responses))
-
-@bot.command()
-@allowed_users_only
-async def shutdown(ctx):
-    """Shut down the bot and reset Spotify output."""
-    await ctx.send("Goodbye, uWu!")
-    switchitup("stop")
-    await bot.close()
-
-@bot.command()
-async def nightsempai(ctx):
-    """Shut down the bot."""
-    await ctx.send("Goodbye, uWu!")
-    await bot.close()
-
 # ---------------- GPT Integration Command ----------------
 
 # For context persistence across calls, use a global dictionary.
 user_contexts = {}
 
 @commands.cooldown(1, 4, commands.BucketType.user)
-@bot.command()
-async def hey(ctx, *, question: str):
-    MAX_CONTEXT_LENGTH = 10  # Keep last 10 messages per user
-    user_id = ctx.author.id
-    if user_id not in user_contexts:
-        user_contexts[user_id] = [{"role": "system", "content": "You are a Discord bot assistant with subtle anti-capitalist and existential undertones. Be nice but slightly indifferent."}]
-    user_contexts[user_id].append({"role": "user", "content": question})
-    if len(user_contexts[user_id]) > MAX_CONTEXT_LENGTH:
-        user_contexts[user_id] = user_contexts[user_id][-MAX_CONTEXT_LENGTH:]
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=user_contexts[user_id]
+@bot.command(name="spot")
+async def spot(ctx, *, input_text: str):
+    """
+    Interprets the user's natural language input to either trigger a command or provide a conversational reply.
+    """
+    # Define a system prompt that instructs ChatGPT to decide between command or conversation.
+    system_prompt = (
+        "You are an interpreter for a Discord Spotify bot. The bot supports the following commands: "
+        "!play <song>, !currentsong, !hitmesempai, !skipthissempai, !queue <song>, !lyrics. "
+        "When the user input clearly maps to one of these commands, reply with 'COMMAND: ' followed by the exact command. "
+        "If the user is simply having a conversation or asking a general question, reply with 'CHAT: ' followed by the response."
     )
-    answer = response.choices[0].message.content.strip()
-    await ctx.send(answer)
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": input_text}
+            ]
+        )
+        # Get the result from ChatGPT.
+        result = response.choices[0].message.content.strip()
+    except Exception as e:
+        await ctx.send(f"Error processing your request: {e}")
+        return
+
+    # Check if the result indicates a command or a general chat reply.
+    if result.startswith("COMMAND:"):
+        # Extract the command portion.
+        command_text = result.replace("COMMAND:", "").strip()
+        await ctx.send(f"Running command")
+        # Option A: Re-dispatch the message as if the user typed a bot command.
+        new_message = ctx.message
+        new_message.content = command_text  # Should be something like "!play song_name"
+        await bot.process_commands(new_message)
+        
+        # Option B (alternative): Directly map and call the function for the command.
+        # For example, if command_text.startswith("!play"), you can call:
+        #   await play(ctx, song_name=command_text.split(" ", 1)[1])
+    elif result.startswith("CHAT:"):
+        chat_reply = result.replace("CHAT:", "").strip()
+        await ctx.send(chat_reply)
+    else:
+        # Fallback if the response doesn't have the expected prefixes.
+        await ctx.send("Sorry, did you want me to run a command or just give a response?")
+
 
 # ---------------- Spotify Queue Commands ----------------
 
@@ -416,39 +349,6 @@ async def queue(ctx, *, song_name):
         await ctx.send(f"Added to queue: {results['tracks']['items'][0]['name']}")
     else:
         await ctx.send("Song not found.")
-
-# ---------------- Signal Handling ----------------
-
-import signal
-import sys
-def signal_handler(sig, frame):
-    print("Shutting down gracefully...")
-    switchitup("stop")
-    sys.exit(0)
-signal.signal(signal.SIGINT, signal_handler)
-
-def switchitup(action):
-    subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", "C:\\Users\\austi\\GitHub\\spot--the-violation-bot\\switchitup.ps1", action])
-
-@bot.event
-async def on_disconnect():
-    switchitup("stop")
-    print("Bot stopped, Spotify output switched back to Default.")
-
-# ---------------- Test Example (if needed) ----------------
-
-# You might remove or separate tests from production code.
-"""
-import pytest
-from discord.ext.commands import Bot, Context
-
-@pytest.mark.asyncio
-async def test_ping_command():
-    bot = Bot(command_prefix="!")
-    ctx = Context(message=..., bot=bot)
-    await bot.get_command('ping').callback(ctx)
-    assert ctx.channel.last_message.content == "heard."
-"""
 
 # Run the bot
 bot.run(TOKEN)
