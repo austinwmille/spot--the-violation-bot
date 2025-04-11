@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import os
+import sys
 import subprocess
 import random
 import asyncio
@@ -43,7 +44,8 @@ sp = Spotify(auth_manager=SpotifyOAuth(
 ALLOWED_USER_IDS = [
     688148738774138913,
     472099505269899266,
-    #764260458898915345
+    #764260458898915345,
+    699750640993173522
 ]
 
 def allowed_users_only(func):
@@ -86,7 +88,6 @@ async def auto_stream():
             if channel and isinstance(channel, discord.VoiceChannel):
                 try:
                     voice_client = await channel.connect()
-                    print("Oh! There's music playing")
                 except Exception as e:
                     print(f"Could not connect to voice channel: {e}")
                     return
@@ -101,7 +102,6 @@ async def auto_stream():
                     options="-ac 2 -ar 48000 -bufsize 256k -threads 2 -vn"
                 )
                 voice_client.play(source, after=lambda e: print(f"Playback finished: {e}"))
-                print("Started streaming Spotify output.")
             except Exception as e:
                 print(f"Error starting audio stream: {e}")
     else:
@@ -117,21 +117,31 @@ async def auto_stream():
 async def on_ready():
     auto_stream.start()
 
+@bot.event
+async def on_message(message):
+    # Skip processing messages from bots.
+    if message.author.bot:
+        return
+
+    content = message.content.strip()
+    # Check if the message begins with "spot" (case-insensitive)
+    if content.lower().startswith("spot"):
+        # Remove "spot" from the beginning and trim whitespace.
+        input_text = content[len("spot"):].strip()
+        # Rewrite the message content to include the command prefix and command name.
+        # For instance, if a user types:
+        #    spot how are you?
+        # It becomes:
+        #    !spot how are you?
+        message.content = f"!spot {input_text}"
+    await bot.process_commands(message)
+
 @bot.command()
 @allowed_users_only
-async def nightsempai(ctx):
+async def quit_close(ctx):
     """Shut down the bot."""
     await ctx.send("night, sempai")
     await bot.close()
-
-# ------------------ Command Handling ------------------
-
-# List of valid bot commands
-VALID_COMMANDS = [
-    "hitmesempai",
-    "skipthissempai", "sleepsempai", "play", "currentsong",
-    "volume", "show_emojis", "nightsempai"
-]
 
 # ---------------- Spotify Output Setup ----------------
 
@@ -142,6 +152,14 @@ VALID_COMMANDS = [
 async def show_emojis(ctx):
     emojis = [str(emoji) for emoji in ctx.guild.emojis]
     await ctx.send(f"Available emojis: {' '.join(emojis)}")
+
+@bot.command()
+@allowed_users_only
+async def restart(ctx):
+    await ctx.send("Restarting the bot...")
+    # Flush the stdout so messages get out before restart.
+    sys.stdout.flush()
+    os.execl(sys.executable, sys.executable, *sys.argv)
 
 # ---------------- Lyrics & Genius Commands ----------------
 
@@ -246,7 +264,7 @@ async def play(ctx, *, song_name):
 
 @bot.command()
 @allowed_users_only
-async def hitmesempai(ctx):
+async def pause_unpause(ctx):
     """Pause/resume Spotify playback."""
     try:
         # Note: Using Spotify API directly since voice_client may not control playback.
@@ -263,7 +281,7 @@ async def hitmesempai(ctx):
 
 @bot.command()
 @allowed_users_only
-async def skipthissempai(ctx):
+async def skip(ctx):
     try:
         sp.next_track()
         await ctx.send("Skipped current track, uWu.")
@@ -293,14 +311,18 @@ async def spot(ctx, *, input_text: str):
     """
     Interprets the user's natural language input to either trigger a command or provide a conversational reply.
     """
-    # Define a system prompt that instructs ChatGPT to decide between command or conversation.
+    # Extract the current command names dynamically.
+    command_names = [cmd.name for cmd in bot.commands]
+    commands_list_text = ", ".join(f"!{name}" for name in command_names)
+    
     system_prompt = (
-        "You are an interpreter for a Discord Spotify bot. The bot supports the following commands: "
-        "!play <song>, !currentsong, !hitmesempai, !skipthissempai, !queue <song>, !lyrics. "
-        "When the user input clearly maps to one of these commands, reply with 'COMMAND: ' followed by the exact command. "
-        "If the user is simply having a conversation or asking a general question, reply with 'CHAT: ' followed by the response."
+        f"You are an interpreter for a Discord bot whose main functionality is Spotify playback. "
+        f"The bot supports the following commands: {commands_list_text}. "
+        "Always respond in EXACTLY one of the following two formats with no extra text:\n"
+        "COMMAND: !<command> <arguments>  (for example, COMMAND: !currentsong)\n"
+        "CHAT: <your response>  (for a general conversational reply)\n"
     )
-
+    
     try:
         response = client.chat.completions.create(
             model="gpt-4",
@@ -309,32 +331,31 @@ async def spot(ctx, *, input_text: str):
                 {"role": "user", "content": input_text}
             ]
         )
-        # Get the result from ChatGPT.
         result = response.choices[0].message.content.strip()
+        print("GPT response:", result)  # Debug output
     except Exception as e:
         await ctx.send(f"Error processing your request: {e}")
         return
 
-    # Check if the result indicates a command or a general chat reply.
     if result.startswith("COMMAND:"):
-        # Extract the command portion.
         command_text = result.replace("COMMAND:", "").strip()
-        await ctx.send(f"Running command")
-        # Option A: Re-dispatch the message as if the user typed a bot command.
+        # Ensure it starts with "!"
+        if not command_text.startswith("!"):
+            command_text = "!" + command_text
+        await ctx.send("Running command")
         new_message = ctx.message
-        new_message.content = command_text  # Should be something like "!play song_name"
-        await bot.process_commands(new_message)
-        
-        # Option B (alternative): Directly map and call the function for the command.
-        # For example, if command_text.startswith("!play"), you can call:
-        #   await play(ctx, song_name=command_text.split(" ", 1)[1])
+        new_message.content = command_text  # Expected format: "!<command> <args>"
+        # Validate that the command exists
+        cmd_name = new_message.content.split()[0].lstrip("!")
+        if bot.get_command(cmd_name) is None:
+            await ctx.send(f"Error: the command '{cmd_name}' is not recognized. Please try again.")
+        else:
+            await bot.process_commands(new_message)
     elif result.startswith("CHAT:"):
         chat_reply = result.replace("CHAT:", "").strip()
         await ctx.send(chat_reply)
     else:
-        # Fallback if the response doesn't have the expected prefixes.
         await ctx.send("Sorry, did you want me to run a command or just give a response?")
-
 
 # ---------------- Spotify Queue Commands ----------------
 
@@ -342,7 +363,7 @@ from collections import deque
 song_queue = deque()
 
 @bot.command()
-async def queue(ctx, *, song_name):
+async def add_queue(ctx, *, song_name):
     results = sp.search(q=song_name, type="track", limit=1)
     if results['tracks']['items']:
         song_queue.append(results['tracks']['items'][0]['uri'])
