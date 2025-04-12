@@ -64,6 +64,21 @@ for var in required_env_vars:
         print(f"Missing environment variable: {var}")
         exit(1)
 
+@tasks.loop(seconds=15)
+async def update_spotify_status():
+    try:
+        current_track = sp.current_playback()
+        if current_track and current_track.get('is_playing'):
+            # Extract only the artist name from the first artist.
+            artist_name = current_track['item']['artists'][0]['name']
+            status = f"{artist_name}"
+        else:
+            status = "..."
+        await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=status))
+    except Exception as e:
+        print(f"Error updating Spotify status: {e}")
+        await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.playing, name="Spotify Bot"))
+
 # OpenAI client setup
 client = OpenAI(api_key=gptkey)
 
@@ -116,6 +131,7 @@ async def auto_stream():
 @bot.event
 async def on_ready():
     auto_stream.start()
+    update_spotify_status.start()  # This updates the status with the artist name
 
 @bot.event
 async def on_message(message):
@@ -143,6 +159,22 @@ async def quit_close(ctx):
     await ctx.send("night, sempai")
     await bot.close()
 
+@bot.command()
+async def guild_info(ctx):
+    """Sends a summary of the guild’s member count, roles, and channels."""
+    guild = ctx.guild
+    member_count = guild.member_count
+    roles = ", ".join([role.name for role in guild.roles if role.name != "@everyone"])
+    channels = ", ".join([channel.name for channel in guild.channels])
+    info = (
+        f"**Guild Name:** {guild.name}\n"
+        f"**Member Count:** {member_count}\n"
+        f"**Roles:** {roles}\n"
+        f"**Channels:** {channels}"
+    )
+    await ctx.send(info)
+
+
 # ---------------- Spotify Output Setup ----------------
 
 # these functions have been superceded by the auto_play function
@@ -160,79 +192,6 @@ async def restart(ctx):
     # Flush the stdout so messages get out before restart.
     sys.stdout.flush()
     os.execl(sys.executable, sys.executable, *sys.argv)
-
-# ---------------- Lyrics & Genius Commands ----------------
-
-def search_genius_lyrics(song_name, artist_name):
-    search_url = "https://www.austinmiller.net/search"
-    headers = {"Authorization": f"Bearer YOUR_GENIUS_API_KEY"}  # Replace with your Genius API key
-    params = {"q": f"{song_name} {artist_name}"}
-    response = requests.get(search_url, headers=headers, params=params)
-    if response.status_code == 200:
-        data = response.json()
-        if data["response"]["hits"]:
-            return data["response"]["hits"][0]["result"]["url"]
-    return None
-
-def fetch_lyrics_from_url(url):
-    response = requests.get(url)
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, "html.parser")
-        lyrics_div = soup.find("div", class_="lyrics")
-        if lyrics_div:
-            return lyrics_div.get_text()
-    return None
-
-@bot.command(name="lyrics")
-async def lyrics(ctx):
-    try:
-        current_track = sp.current_playback()
-        if current_track and current_track['is_playing']:
-            track_name = current_track['item']['name']
-            artist_name = current_track['item']['artists'][0]['name']
-            lyrics_url = search_genius_lyrics(track_name, artist_name)
-            if lyrics_url:
-                await ctx.send(f"🎵 **Lyrics for *{track_name}* by {artist_name}:**\n{lyrics_url}")
-            else:
-                await ctx.send("❌ Lyrics not found for this song.")
-        else:
-            await ctx.send("❌ No song is currently playing.")
-    except Exception as e:
-        print(f"Error fetching lyrics: {e}")
-        await ctx.send("❌ Something went wrong while fetching lyrics.")
-
-@bot.command()
-async def realtime_lyrics(ctx):
-    try:
-        current_track = sp.current_playback()
-        if current_track and current_track['is_playing']:
-            track_name = current_track['item']['name']
-            artist_name = current_track['item']['artists'][0]['name']
-            lrc_file = f"{track_name}_{artist_name}.lrc"  # Ensure you have a matching LRC file
-            await display_lyrics(ctx, lrc_file)
-        else:
-            await ctx.send("No song is currently playing.")
-    except Exception as e:
-        print(f"Error displaying lyrics: {e}")
-        await ctx.send("Something went wrong while displaying lyrics.")
-
-def parse_lrc(lrc_file):
-    lyrics = []
-    with open(lrc_file, "r") as file:
-        for line in file:
-            if line.startswith("["):
-                time_tag = line.split("]")[0][1:]
-                lyric = line.split("]")[1].strip()
-                lyrics.append((time_tag, lyric))
-    return lyrics
-
-async def display_lyrics(ctx, lrc_file):
-    lyrics = parse_lrc(lrc_file)
-    for time_tag, lyric in lyrics:
-        minutes, seconds = time_tag.split(":")
-        seconds = float(minutes) * 60 + float(seconds)
-        await asyncio.sleep(seconds)
-        await ctx.send(lyric)
 
 # ---------------- Spotify Control Commands ----------------
 
@@ -302,50 +261,66 @@ async def volume(ctx, level: int):
 
 # ---------------- GPT Integration Command ----------------
 
-# For context persistence across calls, use a global dictionary.
+# Global dictionary to store conversation context per user:
 user_contexts = {}
+MAX_CONTEXT_LENGTH = 10  # Maximum conversation turns to keep
 
-@commands.cooldown(1, 4, commands.BucketType.user)
+def get_guild_summary(ctx):
+    guild = ctx.guild
+    members = guild.member_count
+    roles = ", ".join([role.name for role in guild.roles if role.name != "@everyone"])
+    return f"The guild is named '{guild.name}' and has {members} members with the following roles: {roles}."
+
 @bot.command(name="spot")
 async def spot(ctx, *, input_text: str):
     """
-    Interprets the user's natural language input to either trigger a command or provide a conversational reply.
+    Uses GPT to interpret the user's natural language input with some memory of previous exchanges.
     """
-    # Extract the current command names dynamically.
-    command_names = [cmd.name for cmd in bot.commands]
-    commands_list_text = ", ".join(f"!{name}" for name in command_names)
+    # Generate a guild summary
+    guild_context = get_guild_summary(ctx)
+    # User-specific information
+    user_context = f"The current user is {ctx.author.name} (ID: {ctx.author.id})."
     
-    system_prompt = (
-        f"You are an interpreter for a Discord bot whose main functionality is Spotify playback. "
-        f"The bot supports the following commands: {commands_list_text}. "
-        "Always respond in EXACTLY one of the following two formats with no extra text:\n"
-        "COMMAND: !<command> <arguments>  (for example, COMMAND: !currentsong)\n"
-        "CHAT: <your response>  (for a general conversational reply)\n"
-    )
+    # Retrieve or initialize context for this user, starting with a system prompt.
+    context = user_contexts.get(ctx.author.id, [
+        {"role": "system", "content": (
+            f"You are an interpreter for a Discord bot whose main functionality is Spotify playback. "
+            f"In addition, you have the following context: {guild_context} {user_context} "
+            f"The bot supports the following commands: {get_commands_list_text()}. "
+            "When the user's input clearly maps to one of these commands, reply with 'COMMAND: !<command> <arguments>' exactly. "
+            "If the message is conversational or vague, reply with 'CHAT: <your response>'."
+        )}
+    ])
+    
+    # Append the current user input to the context.
+    context.append({"role": "user", "content": input_text})
+    
+    # Limit context length
+    if len(context) > MAX_CONTEXT_LENGTH:
+        context = context[-MAX_CONTEXT_LENGTH:]
     
     try:
         response = client.chat.completions.create(
             model="gpt-4",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": input_text}
-            ]
+            messages=context
         )
         result = response.choices[0].message.content.strip()
-        print("GPT response:", result)  # Debug output
+        print("GPT response:", result)
     except Exception as e:
         await ctx.send(f"Error processing your request: {e}")
         return
 
+    # Append the GPT response to the context and update stored memory.
+    context.append({"role": "assistant", "content": result})
+    user_contexts[ctx.author.id] = context
+
     if result.startswith("COMMAND:"):
         command_text = result.replace("COMMAND:", "").strip()
-        # Ensure it starts with "!"
         if not command_text.startswith("!"):
             command_text = "!" + command_text
         await ctx.send("Running command")
         new_message = ctx.message
-        new_message.content = command_text  # Expected format: "!<command> <args>"
-        # Validate that the command exists
+        new_message.content = command_text  # For example, "!currentsong"
         cmd_name = new_message.content.split()[0].lstrip("!")
         if bot.get_command(cmd_name) is None:
             await ctx.send(f"Error: the command '{cmd_name}' is not recognized. Please try again.")
@@ -356,6 +331,10 @@ async def spot(ctx, *, input_text: str):
         await ctx.send(chat_reply)
     else:
         await ctx.send("Sorry, did you want me to run a command or just give a response?")
+        
+def get_commands_list_text():
+    command_names = [cmd.name for cmd in bot.commands]
+    return ", ".join(f"!{name}" for name in command_names)
 
 # ---------------- Spotify Queue Commands ----------------
 
