@@ -275,6 +275,7 @@ def get_guild_summary(ctx):
 async def spot(ctx, *, input_text: str):
     """
     Uses GPT to interpret the user's natural language input with some memory of previous exchanges.
+    Handles both commands and conversational queries.
     """
     # Generate a guild summary
     guild_context = get_guild_summary(ctx)
@@ -287,8 +288,8 @@ async def spot(ctx, *, input_text: str):
             f"You are an interpreter for a Discord bot whose main functionality is Spotify playback. "
             f"In addition, you have the following context: {guild_context} {user_context} "
             f"The bot supports the following commands: {get_commands_list_text()}. "
-            "When the user's input clearly maps to one of these commands, reply with 'COMMAND: !<command> <arguments>' exactly. "
-            "If the message is conversational or vague, reply with 'CHAT: <your response>'."
+            "When the user's input clearly maps to one of these commands, reply with 'COMMAND: spot<command> <arguments>' exactly. "
+            "If the message is conversational or vague, reply with 'CHAT: <your response>' and help the user accordingly."
         )}
     ])
     
@@ -301,7 +302,7 @@ async def spot(ctx, *, input_text: str):
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4.1-mini",  # Or your model of choice
             messages=context
         )
         result = response.choices[0].message.content.strip()
@@ -316,12 +317,12 @@ async def spot(ctx, *, input_text: str):
 
     if result.startswith("COMMAND:"):
         command_text = result.replace("COMMAND:", "").strip()
-        if not command_text.startswith("!"):
-            command_text = "!" + command_text
+        if not command_text.startswith("spot"):
+            command_text = "spot" + command_text
         await ctx.send("Running command")
         new_message = ctx.message
-        new_message.content = command_text  # For example, "!currentsong"
-        cmd_name = new_message.content.split()[0].lstrip("!")
+        new_message.content = command_text  # For example, "spot currentsong"
+        cmd_name = new_message.content.split()[0].lstrip("spot")
         if bot.get_command(cmd_name) is None:
             await ctx.send(f"Error: the command '{cmd_name}' is not recognized. Please try again.")
         else:
@@ -330,8 +331,8 @@ async def spot(ctx, *, input_text: str):
         chat_reply = result.replace("CHAT:", "").strip()
         await ctx.send(chat_reply)
     else:
-        await ctx.send("Sorry, did you want me to run a command or just give a response?")
-        
+        await ctx.send("Sorry, I can't decide if you wanted a response or a command.")
+
 def get_commands_list_text():
     command_names = [cmd.name for cmd in bot.commands]
     return ", ".join(f"!{name}" for name in command_names)
@@ -341,14 +342,100 @@ def get_commands_list_text():
 from collections import deque
 song_queue = deque()
 
+# ---------------- Basic Utility Commands ----------------
+
 @bot.command()
-async def add_queue(ctx, *, song_name):
+async def weather(ctx, *, city: str):
+    response = requests.get(f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid=your_api_key")
+    data = response.json()
+    if data.get("cod") != "404":
+        main_data = data["main"]
+        weather_desc = data["weather"][0]["description"]
+        await ctx.send(f"Weather in {city}: {weather_desc}, {main_data['temp']}K")
+    else:
+        await ctx.send("City not found.")
+
+@bot.command()
+async def joke(ctx):
+    response = requests.get("https://official-joke-api.appspot.com/random_joke")
+    joke = response.json()
+    await ctx.send(f"{joke['setup']} - {joke['punchline']}")
+
+@bot.command()
+async def fact(ctx):
+    response = requests.get("https://uselessfacts.jsph.pl/random.json?language=en")
+    fact = response.json()
+    await ctx.send(f"Did you know? {fact['text']}")
+
+# ---------------- Interaction with Other Discord Bots ----------------
+
+@bot.command()
+async def quote(ctx, message_id: int):
+    try:
+        message = await ctx.fetch_message(message_id)
+        await ctx.send(f"Quote: {message.content}")
+    except discord.NotFound:
+        await ctx.send("Message not found.")
+
+# ---------------- Enhanced Music Features ----------------
+
+@bot.command()
+async def queue(ctx, *, song_name):
     results = sp.search(q=song_name, type="track", limit=1)
     if results['tracks']['items']:
-        song_queue.append(results['tracks']['items'][0]['uri'])
-        await ctx.send(f"Added to queue: {results['tracks']['items'][0]['name']}")
+        song_uri = results['tracks']['items'][0]['uri']
+        song_queue.append(song_uri)
+        await ctx.send(f"Added {results['tracks']['items'][0]['name']} to the queue.")
     else:
         await ctx.send("Song not found.")
+
+@bot.command()
+async def skip_all(ctx):
+    song_queue.clear()
+    await ctx.send("Cleared the queue!")
+
+# ---------------- Games and Fun Commands ----------------
+
+@bot.command()
+async def flip(ctx):
+    result = random.choice(["Heads", "Tails"])
+    await ctx.send(f"The coin landed on: {result}")
+
+@bot.command()
+async def roll(ctx, sides: int):
+    result = random.randint(1, sides)
+    await ctx.send(f"You rolled a {result} on a {sides}-sided dice.")
+
+# ---------------- Integration with Other Services ----------------
+
+@bot.command()
+async def news(ctx):
+    response = requests.get("https://newsapi.org/v2/top-headlines?country=us&apiKey=your_api_key")
+    data = response.json()
+    if data["status"] == "ok":
+        articles = data["articles"]
+        news = "\n".join([f"{article['title']} - {article['url']}" for article in articles[:5]])
+        await ctx.send(f"Latest News:\n{news}")
+    else:
+        await ctx.send("Couldn't fetch the news.")
+
+# ---------------- Admin Commands ----------------
+
+
+# ---------------- User Interaction Commands ----------------
+
+@bot.command()
+async def remind(ctx, time: int, *, reminder: str):
+    await ctx.send(f"Reminder set! I will remind you in {time} seconds.")
+    await asyncio.sleep(time)
+    await ctx.send(f"Reminder: {reminder}")
+
+# ---------------- Custom Responses and Fun Interactions ----------------
+
+@bot.command()
+async def greet(ctx, name: str):
+    await ctx.send(f"Hello, {name}! How are you today?")
+
 
 # Run the bot
 bot.run(TOKEN)
