@@ -258,31 +258,39 @@ async def spot(ctx, *, input_text: str):
     context.append({"role": "assistant", "content": result})
     user_contexts[ctx.author.id] = context
 
+    if not (result.startswith("COMMAND:") or result.startswith("CHAT:")):
+        result = "CHAT: " + result
+        
+ # —— dispatch GPT’s “COMMAND:” or “CHAT:” exactly once ——
     if result.startswith("COMMAND:"):
-        # Extract and normalize the command text
-        command_text = result.replace("COMMAND:", "").strip()
+        # pull out everything after COMMAND:
+        command_text = result[len("COMMAND:"):].strip()
+
+        # if it still begins with "spot ", drop that  
+        if command_text.lower().startswith("spot "):
+            command_text = command_text[5:]
+
+        # make sure it has a "!"
         if not command_text.startswith("!"):
-            command_text = "!" + command_text
+            command_text = f"!{command_text}"
 
-        # Only now do we announce that we’re dispatching a command
         await ctx.send("Running command")
-        new_message = ctx.message
-        new_message.content = command_text
 
-        # Validate and process
+        # overwrite the same message and dispatch
+        ctx.message.content = command_text
         cmd_name = command_text.split()[0].lstrip("!")
-        if bot.get_command(cmd_name) is None:
-            await ctx.send(f"Error: the command '{cmd_name}' is not recognized. Please try again.")
+        if bot.get_command(cmd_name):
+            await bot.process_commands(ctx.message)
         else:
-            await bot.process_commands(new_message)
+            await ctx.send(f"Error: unknown command '{cmd_name}'")
 
     elif result.startswith("CHAT:"):
-        # Pure chat reply—no “Running command” here
-        chat_reply = result.replace("CHAT:", "").strip()
+        # normal chat reply
+        chat_reply = result[len("CHAT:"):].strip()
         await ctx.send(chat_reply)
 
     else:
-        await ctx.send("Sorry, I can't decide if you wanted a response or a command.")
+        await ctx.send("Sorry, I couldn’t tell if you wanted a command or just a chat response.")
 
 # Run the bot
 bot.run(TOKEN)
