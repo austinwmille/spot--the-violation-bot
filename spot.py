@@ -12,8 +12,6 @@ from openai import OpenAI
 import requests
 from bs4 import BeautifulSoup
 
-
-
 # Load configuration
 load_dotenv('botsecs.env')
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -260,7 +258,7 @@ async def spot(ctx, *, input_text: str):
 
     if not (result.startswith("COMMAND:") or result.startswith("CHAT:")):
         result = "CHAT: " + result
-        
+
  # —— dispatch GPT’s “COMMAND:” or “CHAT:” exactly once ——
     if result.startswith("COMMAND:"):
         # pull out everything after COMMAND:
